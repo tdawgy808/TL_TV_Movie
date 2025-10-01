@@ -14,11 +14,20 @@
 <body class="text-slate-900">
   <div id="root" class="min-h-screen"></div>
 
-  <script type="text/babel">
+  <!-- Compile JSX with Babel; explicitly set presets to avoid Script error on older browsers -->
+  <script type="text/babel" data-presets="env,react">
     const { useEffect: U, useMemo: M, useRef: R, useState: S } = React;
 
     // Embedded TMDB API key (public in this file). If you prefer privacy, use the Worker build.
     const API_KEY = "ac1d1e5563807a1a41306d1eec6a8374";
+
+    // ---- Global error guards to surface otherwise-generic "Script error" ----
+    (function installGlobalErrorHandlers(){
+      const q = new URLSearchParams(location.search);
+      const debug = q.get('debug') === '1';
+      window.addEventListener('error', (e) => { if (debug) console.error('[GlobalError]', e.message, e.error); });
+      window.addEventListener('unhandledrejection', (e) => { if (debug) console.error('[UnhandledRejection]', e.reason); });
+    })();
 
     // ---- Helpers ----
     function providerGroupsForRegion(resultByRegion){
@@ -82,8 +91,14 @@
       const [query, setQuery]     = S('');
       const [type, setType]       = S('multi'); // multi | tv | movie
       const [searching, setSearching] = S(false);
+      const [searchErr, setSearchErr] = S('');
       const [results, setResults] = S([]);
       const [watch, setWatch]     = S([]); // {id, media_type, title, year}
+
+      const [watchTab, setWatchTab] = S('tv');
+      const tvItems = M(() => watch.filter(w => w.media_type === 'tv'), [watch]);
+      const movieItems = M(() => watch.filter(w => w.media_type === 'movie'), [watch]);
+      const currentItems = watchTab === 'tv' ? tvItems : movieItems;
 
       const cache = R(new Map()); // providers cache by `${type}:${id}:${region}`
 
@@ -103,18 +118,23 @@
             u.searchParams.set('api_key', API_KEY);
             u.searchParams.set('query', q);
             u.searchParams.set('include_adult', 'false');
-            const res = await fetch(u);
-            if (!res.ok) throw new Error(`Search failed (${res.status})`);
-            const data = await res.json();
-            return (data.results || [])
-              .filter(r => (r.media_type ? (r.media_type==='tv' || r.media_type==='movie') : true))
-              .map(r => ({
-                id: r.id,
-                title: r.title || r.name || r.original_title || r.original_name || `#${r.id}`,
-                year: (r.release_date || r.first_air_date || '').slice(0,4),
-                poster: r.poster_path ? img(r.poster_path) : '',
-                media_type: r.media_type || (t==='tv' ? 'tv' : 'movie')
-              }));
+            try {
+              const res = await fetch(u);
+              if (!res.ok) throw new Error(`Search failed (${res.status})`);
+              const data = await res.json();
+              return (data.results || [])
+                .filter(r => (r.media_type ? (r.media_type==='tv' || r.media_type==='movie') : true))
+                .map(r => ({
+                  id: r.id,
+                  title: r.title || r.name || r.original_title || r.original_name || `#${r.id}`,
+                  year: (r.release_date || r.first_air_date || '').slice(0,4),
+                  poster: r.poster_path ? img(r.poster_path) : '',
+                  media_type: r.media_type || (t==='tv' ? 'tv' : 'movie')
+                }));
+            } catch (e) {
+              console.warn('[search] error', e);
+              throw e;
+            }
           },
           async details(id, mt){
             const u = new URL(`${BASE}/${mt}/${id}`);
@@ -205,9 +225,9 @@
                     <div className="text-lg font-semibold leading-tight">{i.title}</div>
                     <div className="text-sm text-slate-500">{i.year || ''} · {i.media_type.toUpperCase()}</div>
                   </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => setWatch(p => p.some(w => w.id===i.id && w.media_type===i.media_type) ? p : [...p, { id:i.id, title:i.title, year:i.year||'', media_type:i.media_type }])} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Add</button>
-                    <button onClick={toggle} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">{open ? 'Hide' : 'Providers'}</button>
+                  <div className="flex flex-col md:flex-row gap-2 md:items-center">
+                    <button onClick={() => setWatch(p => p.some(w => w.id===i.id && w.media_type===i.media_type) ? p : [...p, { id:i.id, title:i.title, year:i.year||'', media_type:i.media_type }])} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md w-full md:w-auto">Add</button>
+                    <button onClick={toggle} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md w-full md:w-auto">{open ? 'Hide' : 'Providers'}</button>
                   </div>
                 </div>
                 {open && (
@@ -293,8 +313,12 @@
       function doSearch(e){
         e && e.preventDefault && e.preventDefault();
         if (!query.trim()) return;
+        setSearchErr('');
         setSearching(true);
-        tmdb.search(query.trim(), type).then(setResults).catch(()=>{}).finally(()=>setSearching(false));
+        tmdb.search(query.trim(), type)
+          .then(setResults)
+          .catch((e)=>{ setResults([]); setSearchErr('Search failed. Please try again.'); })
+          .finally(()=>setSearching(false));
       }
 
       return (
@@ -324,6 +348,7 @@
                 <input type="text" className="flex-1 rounded-xl border px-3 py-2" placeholder="Search (e.g., The Bear, Dune)" value={query} onChange={e=>setQuery(e.target.value)} />
                 <button type="submit" className="rounded-xl border px-4 py-2 shadow hover:shadow-md disabled:opacity-50" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button>
               </form>
+              {searchErr && <div className="mt-2 text-sm text-red-600">{searchErr}</div>}
               {results?.length ? (
                 <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {results.map(r => <ResultCard key={`${r.media_type}:${r.id}`} item={r} />)}
@@ -336,14 +361,18 @@
             <aside className="rounded-2xl border p-4 bg-white/70">
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-lg font-semibold">Your Watchlist</h2>
-                <span className="text-sm text-slate-500">{watch.length} item{watch.length!==1?'s':''}</span>
+                <div className="text-xs text-slate-500">{tvItems.length} TV · {movieItems.length} Movies · {watch.length} total</div>
+              </div>
+              <div className="mb-3 flex rounded-xl border bg-white/60 overflow-hidden">
+                <button onClick={()=>setWatchTab('tv')} className={"flex-1 px-3 py-1.5 text-sm "+(watchTab==='tv'?'bg-white font-medium shadow-inner':'opacity-70 hover:opacity-100')}>TV ({tvItems.length})</button>
+                <button onClick={()=>setWatchTab('movie')} className={"flex-1 px-3 py-1.5 text-sm "+(watchTab==='movie'?'bg-white font-medium shadow-inner':'opacity-70 hover:opacity-100')}>Movies ({movieItems.length})</button>
               </div>
 
-              {watch.length===0 ? (
-                <div className="text-sm text-slate-600">Add items from the search results to build your list.</div>
+              {currentItems.length===0 ? (
+                <div className="text-sm text-slate-600">No {watchTab==='tv'?'TV shows':'movies'} yet — add from results.</div>
               ) : (
                 <div className="space-y-3">
-                  {watch.map(w => <WatchItem key={`${w.media_type}:${w.id}`} item={w} />)}
+                  {currentItems.map(w => <WatchItem key={`${w.media_type}:${w.id}`} item={w} />)}
                 </div>
               )}
 
@@ -368,18 +397,55 @@
       );
     }
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-
-    // ---- Optional self-tests (run with ?selftest=1) ----
-    if (location.search.includes('selftest=1')){
-      console.log('[SelfTest] Running basic assertions…');
+    // Ensure React/ReactDOM loaded before rendering
+    (function boot(){
+      if (!window.React || !window.ReactDOM) {
+        console.error('React or ReactDOM failed to load.');
+        return;
+      }
       try {
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+      } catch (e) {
+        console.error('Failed to render app', e);
+      }
+    })();
+
+    // ---- Self-tests (run with ?selftest=1) ----
+    if (location.search.includes('selftest=1')){
+      console.log('[SelfTest] Running assertions…');
+      try {
+        // Parsing tests
         const a = parseShareHash('#ids=tv:1399,movie:550&reg=US');
         console.assert(a.reg === 'US', 'reg should be US');
         console.assert(a.ids.length === 2, 'should parse two ids');
         console.assert(a.ids[0].media_type === 'tv' && a.ids[0].id === 1399, 'first token parsed');
         console.assert(a.ids[1].media_type === 'movie' && a.ids[1].id === 550, 'second token parsed');
+        const b = parseShareHash('#ids=tv:bad,movie:notnum&reg=xx');
+        console.assert(b.ids.length === 0 && b.reg === 'XX', 'invalid ids dropped, reg uppercased');
+
+        // Filtering tests
+        const sample=[{media_type:'tv',id:1},{media_type:'movie',id:2},{media_type:'tv',id:3}];
+        const tvCount = sample.filter(w=>w.media_type==='tv').length;
+        const movieCount = sample.filter(w=>w.media_type==='movie').length;
+        console.assert(tvCount===2,'tv filter');
+        console.assert(movieCount===1,'movie filter');
+
+        // Provider grouping test (minimal)
+        const groups = providerGroupsForRegion({flatrate:[{provider_id:1,provider_name:'X',logo_path:'/x.png'}]});
+        console.assert(groups.find(g=>g.type==='Streaming').items.length===1,'provider grouping');
+
+        // Share link composition roundtrip
+        (function testShareRoundTrip(){
+          const region='US';
+          const watch=[{media_type:'tv',id:10},{media_type:'movie',id:20}];
+          const ids = watch.map(w => `${w.media_type}:${w.id}`).join(',');
+          const u = new URL(location.href.split('#')[0]);
+          u.hash = new URLSearchParams({ ids, reg: region }).toString();
+          const parsed = parseShareHash(u.hash);
+          console.assert(parsed.reg==='US' && parsed.ids.length===2,'roundtrip ok');
+        })();
+
         console.log('[SelfTest] OK');
       } catch (e) {
         console.warn('[SelfTest] Failed', e);
