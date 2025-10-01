@@ -30,6 +30,9 @@
     })();
 
     // ---- Helpers ----
+    function tmdbImg(p, s='w154'){ return p ? `https://image.tmdb.org/t/p/${s}${p}` : ''; }
+    function tmdbPageUrl(mt, id){ return `https://www.themoviedb.org/${mt==='movie'?'movie':'tv'}/${id}` }
+
     function providerGroupsForRegion(resultByRegion){
       const buckets = [
         { key: 'flatrate', label: 'Streaming' },
@@ -43,7 +46,7 @@
         items: (resultByRegion?.[b.key] || []).map(p => ({
           provider_id: p.provider_id,
           provider_name: p.provider_name,
-          logo: p.logo_path ? `https://image.tmdb.org/t/p/w45${p.logo_path}` : ''
+          logo: p.logo_path ? tmdbImg(p.logo_path, 'w45') : ''
         }))
       }));
     }
@@ -93,7 +96,7 @@
       const [searching, setSearching] = S(false);
       const [searchErr, setSearchErr] = S('');
       const [results, setResults] = S([]);
-      const [watch, setWatch]     = S([]); // {id, media_type, title, year}
+      const [watch, setWatch]     = S([]); // {id, media_type, title, year, poster}
 
       const [watchTab, setWatchTab] = S('tv');
       const tvItems = M(() => watch.filter(w => w.media_type === 'tv'), [watch]);
@@ -109,9 +112,8 @@
       // TMDB tiny client
       const tmdb = M(() => {
         const BASE = 'https://api.themoviedb.org/3';
-        const img  = (p, s='w154') => p ? `https://image.tmdb.org/t/p/${s}${p}` : '';
         return {
-          img,
+          img: tmdbImg,
           async search(q, t){
             const endpoint = t === 'tv' ? 'search/tv' : t === 'movie' ? 'search/movie' : 'search/multi';
             const u = new URL(`${BASE}/${endpoint}`);
@@ -128,7 +130,7 @@
                   id: r.id,
                   title: r.title || r.name || r.original_title || r.original_name || `#${r.id}`,
                   year: (r.release_date || r.first_air_date || '').slice(0,4),
-                  poster: r.poster_path ? img(r.poster_path) : '',
+                  poster: r.poster_path ? tmdbImg(r.poster_path) : '',
                   media_type: r.media_type || (t==='tv' ? 'tv' : 'movie')
                 }));
             } catch (e) {
@@ -170,18 +172,18 @@
         setWatch(prev => {
           const seen = new Set(prev.map(p => `${p.media_type}:${p.id}`));
           const add = ids
-            .map(({id, media_type}) => ({ id, media_type, title: `${media_type.toUpperCase()} #${id}`, year: '' }))
+            .map(({id, media_type}) => ({ id, media_type, title: `${media_type.toUpperCase()} #${id}`, year: '', poster: '' }))
             .filter(x => !seen.has(`${x.media_type}:${x.id}`));
           return [...prev, ...add];
         });
-        // Enrich with real titles/years
+        // Enrich with real titles/years/poster
         (async () => {
           const enriched = await Promise.all(ids.map(async ({id, media_type}) => {
             try {
               const d = await tmdb.details(id, media_type);
-              return { id, media_type, title: d.title || d.name || `#${id}`, year: (d.release_date || d.first_air_date || '').slice(0,4) };
+              return { id, media_type, title: d.title || d.name || `#${id}`, year: (d.release_date || d.first_air_date || '').slice(0,4), poster: tmdbImg(d.poster_path) };
             } catch {
-              return { id, media_type, title: `${media_type.toUpperCase()} #${id}`, year: '' };
+              return { id, media_type, title: `${media_type.toUpperCase()} #${id}`, year: '', poster: '' };
             }
           }));
           setWatch(prev => {
@@ -226,7 +228,7 @@
                     <div className="text-sm text-slate-500">{i.year || ''} · {i.media_type.toUpperCase()}</div>
                   </div>
                   <div className="flex flex-col md:flex-row gap-2 md:items-center">
-                    <button onClick={() => setWatch(p => p.some(w => w.id===i.id && w.media_type===i.media_type) ? p : [...p, { id:i.id, title:i.title, year:i.year||'', media_type:i.media_type }])} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md w-full md:w-auto">Add</button>
+                    <button onClick={() => setWatch(p => p.some(w => w.id===i.id && w.media_type===i.media_type) ? p : [...p, { id:i.id, title:i.title, year:i.year||'', media_type:i.media_type, poster:i.poster||'' }])} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md w-full md:w-auto">Add</button>
                     <button onClick={toggle} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md w-full md:w-auto">{open ? 'Hide' : 'Providers'}</button>
                   </div>
                 </div>
@@ -256,21 +258,34 @@
         }
         return (
           <div className="rounded-2xl border p-3 bg-white/70">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="font-medium">{i.title}</div>
-                <div className="text-sm text-slate-500">{i.year || ''} · {i.media_type.toUpperCase()}</div>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={toggle} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">{open ? 'Hide' : 'Providers'}</button>
-                <button onClick={() => setWatch(p => p.filter(w => !(w.id===i.id && w.media_type===i.media_type)))} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Remove</button>
+            <div className="flex gap-3">
+              {i.poster ? (
+              <a href={tmdbPageUrl(i.media_type, i.id)} target="_blank" rel="noopener noreferrer" title="Open on TMDB">
+                <img src={i.poster} alt={`${i.title} poster`} loading="lazy" className="w-16 h-24 object-cover rounded-xl hover:brightness-110 transition"/>
+              </a>
+            ) : (
+              <a href={tmdbPageUrl(i.media_type, i.id)} target="_blank" rel="noopener noreferrer" className="w-16 h-24 bg-slate-100 rounded-xl flex items-center justify-center text-xs text-slate-400 hover:underline">
+                TMDB
+              </a>
+            )}
+              <div className="flex-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-medium">{i.title}</div>
+                    <div className="text-sm text-slate-500">{i.year || ''} · {i.media_type.toUpperCase()}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={toggle} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">{open ? 'Hide' : 'Providers'}</button>
+                    <button onClick={() => setWatch(p => p.filter(w => !(w.id===i.id && w.media_type===i.media_type)))} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Remove</button>
+                  </div>
+                </div>
+                {open && (
+                  <div className="mt-3">
+                    {loading ? <div className="text-sm">Loading providers…</div> : (groups ? <ProviderPills groups={groups}/> : <div className="text-sm text-red-600">Failed to load providers.</div>)}
+                  </div>
+                )}
               </div>
             </div>
-            {open && (
-              <div className="mt-3">
-                {loading ? <div className="text-sm">Loading providers…</div> : (groups ? <ProviderPills groups={groups}/> : <div className="text-sm text-red-600">Failed to load providers.</div>)}
-              </div>
-            )}
           </div>
         );
       }
@@ -298,9 +313,9 @@
           if (!Number.isFinite(id)) return null;
           try {
             const d = await tmdb.details(id, m);
-            return { id, media_type:m, title: d.title || d.name || `#${id}`, year: (d.release_date||d.first_air_date||'').slice(0,4) };
+            return { id, media_type:m, title: d.title || d.name || `#${id}`, year: (d.release_date||d.first_air_date||'').slice(0,4), poster: tmdbImg(d.poster_path) };
           } catch {
-            return { id, media_type:m, title: `${m.toUpperCase()} #${id}`, year: '' };
+            return { id, media_type:m, title: `${m.toUpperCase()} #${id}`, year: '', poster: '' };
           }
         }));
         setWatch(prev => {
@@ -434,6 +449,12 @@
         // Provider grouping test (minimal)
         const groups = providerGroupsForRegion({flatrate:[{provider_id:1,provider_name:'X',logo_path:'/x.png'}]});
         console.assert(groups.find(g=>g.type==='Streaming').items.length===1,'provider grouping');
+
+        // tmdb image helper
+        console.assert(tmdbImg('/x.png')==='https://image.tmdb.org/t/p/w154/x.png','tmdbImg builds url');
+        // tmdb page url helper
+        console.assert(tmdbPageUrl('tv',123)==='https://www.themoviedb.org/tv/123','tmdbPageUrl tv');
+        console.assert(tmdbPageUrl('movie',456)==='https://www.themoviedb.org/movie/456','tmdbPageUrl movie');
 
         // Share link composition roundtrip
         (function testShareRoundTrip(){
