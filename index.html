@@ -1,1 +1,390 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>StreamFinder — React (TV+Movies)</title><meta name="description" content="Search TV shows and movies, see where they stream by region, build a watchlist, and share a link. React single-file edition. Powered by TMDB."/><script src="https://cdn.tailwindcss.com"></script><style>body{background:linear-gradient(#eff6ff,#fff)}</style><script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script><script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script><script src="https://unpkg.com/@babel/standalone/babel.min.js"></script></head><body class="text-slate-900"><div id="root" class="min-h-screen"></div><script type="text/babel">const{useEffect:U,useMemo:M,useRef:R,useState:S}=React;const API_KEY="ac1d1e5563807a1a41306d1eec6a8374";const ProviderPills=({groups:g})=>{const v=(g||[]).filter(x=>x.items&&x.items.length);if(!v.length)return <div className="text-sm text-slate-500">No providers found for this region.</div>;return <div className="flex flex-wrap gap-2">{v.map(x=>(<div key={x.type} className="rounded-2xl border px-3 py-2 shadow-sm"><div className="text-xs font-medium opacity-70 mb-1">{x.type}</div><div className="flex flex-wrap gap-1 items-center">{x.items.map(p=>(<span key={p.provider_id} className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs">{p.logo&&<img src={p.logo} alt={p.provider_name} className="h-4 w-4 rounded"/>}{p.provider_name}</span>))}</div></div>))}</div>};function App(){const[region,setRegion]=S("US"),[query,setQuery]=S(""),[type,setType]=S("multi"),[searching,setSearching]=S(!1),[results,setResults]=S([]),[watch,setWatch]=S([]);const cache=R(new Map);U(()=>{try{const r=localStorage.getItem("streamfinder_region");if(r)setRegion(r)}catch{}},[]);U(()=>{try{localStorage.setItem("streamfinder_region",region)}catch{}},[region]);U(()=>{const p=new URLSearchParams(location.hash.replace(/^#/,''));const ids=(p.get('ids')||'').split(',').map(s=>s.trim()).filter(Boolean);const reg=p.get('reg');if(reg) setRegion(reg.toUpperCase());if(ids.length){const list=ids.map(t=>{const [mt,idStr]=t.split(':');const m=(mt||'').toLowerCase()==='movie'?'movie':'tv';const id=parseInt(idStr,10);return Number.isFinite(id)?{id,media_type:m,title:`${m.toUpperCase()} #${id}`,year:''}:null}).filter(Boolean);if(list.length){setWatch(prev=>{const seen=new Set(prev.map(p=>`${p.media_type}:${p.id}`));const add=list.filter(x=>!seen.has(`${x.media_type}:${x.id}`));return[...prev,...add]});Promise.all(list.map(async it=>{try{const d=await tmdb.details(it.id,it.media_type);return{id:it.id,media_type:it.media_type,title:d.title||d.name||`#${it.id}`,year:(d.release_date||d.first_air_date||'').slice(0,4)}}catch{return it}})).then(updated=>{setWatch(prev=>{const map=new Map(prev.map(w=>[`${w.media_type}:${w.id}`,w]));updated.forEach(u=>map.set(`${u.media_type}:${u.id}`,u));return Array.from(map.values())})})}}},[]);const tmdb=M(()=>{const B='https://api.themoviedb.org/3',img=(p,s='w154')=>p?`https://image.tmdb.org/t/p/${s}${p}`:'';return{img,search:async(q,t)=>{const e=t==='tv'?'search/tv':t==='movie'?'search/movie':'search/multi',u=new URL(`${B}/${e}`);u.searchParams.set('api_key',API_KEY);u.searchParams.set('query',q);u.searchParams.set('include_adult','false');const res=await fetch(u);if(!res.ok)throw new Error(`Search failed (${res.status})`);const data=await res.json();return(data.results||[]).filter(r=>r.media_type?(r.media_type==='tv'||r.media_type==='movie'):true).map(r=>({id:r.id,title:r.title||r.name||r.original_title||r.original_name||`#${r.id}`,year:(r.release_date||r.first_air_date||'').slice(0,4),poster:r.poster_path?img(r.poster_path):'',media_type:r.media_type||(t==='tv'?'tv':'movie')}))},details:async(id,mt)=>{const u=new URL(`${B}/${mt}/${id}`);u.searchParams.set('api_key',API_KEY);const res=await fetch(u);if(!res.ok)throw new Error('Details failed');return res.json()},providers:async(id,mt)=>{const u=new URL(`${B}/${mt}/${id}/watch/providers`);u.searchParams.set('api_key',API_KEY);const res=await fetch(u);if(!res.ok)throw new Error('Providers failed');return res.json()}}},[]);function shareLink(){const ids=watch.map(w=>`${w.media_type}:${w.id}`).join(','),u=new URL(location.href.split('#')[0]);u.hash=new URLSearchParams({ids,reg:region}).toString();return u.toString()}async function getProviders(id,mt){const k=`${mt}:${id}:${region}`;const c=cache.current.get(k);if(c)return c;const data=await tmdb.providers(id,mt);const r=(data.results||{})[region];const buckets=[{key:'flatrate',label:'Streaming'},{key:'ads',label:'Free (ads)'},{key:'free',label:'Free'},{key:'rent',label:'Rent'},{key:'buy',label:'Buy'}];const groups=buckets.map(b=>({type:b.label,items:(r?.[b.key]||[]).map(p=>({provider_id:p.provider_id,provider_name:p.provider_name,logo:p.logo_path?`https://image.tmdb.org/t/p/w45${p.logo_path}`:''}))}));cache.current.set(k,groups);return groups}function ResultCard({item:i}){const[open,setOpen]=S(!1),[loading,setLoading]=S(!1),[groups,setGroups]=S(null);async function toggle(){if(open){setOpen(!1);return}setOpen(!0);if(groups)return;setLoading(!0);try{const g=await getProviders(i.id,i.media_type);setGroups((g||[]).filter(gr=>gr.type==='Streaming'))}catch{setGroups([])}finally{setLoading(!1)}}return(<div className="rounded-2xl border p-3 shadow-sm bg-white/70"><div className="flex gap-3">{i.poster?<img src={i.poster} alt="" className="w-20 h-28 object-cover rounded-xl"/>:<div className="w-20 h-28 bg-slate-100 rounded-xl"/>}<div className="flex-1"><div className="flex items-start justify-between gap-3"><div><div className="text-lg font-semibold leading-tight">{i.title}</div><div className="text-sm text-slate-500">{i.year||''} · {i.media_type.toUpperCase()}</div></div><div className="flex gap-2"><button onClick={()=>setWatch(p=>p.some(w=>w.id===i.id&&w.media_type===i.media_type)?p:[...p,{id:i.id,title:i.title,year:i.year||'',media_type:i.media_type}])} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Add</button><button onClick={toggle} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">{open?'Hide':'Providers'}</button></div></div>{open&&(<div className="mt-3">{loading?<div className="text-sm">Loading providers…</div>:groups?<ProviderPills groups={groups}/>:<div className="text-sm text-red-600">Failed to load providers.</div>}</div>)}</div></div></div>)}function WatchItem({item:i}){const[open,setOpen]=S(!1),[loading,setLoading]=S(!1),[groups,setGroups]=S(null);async function toggle(){if(open){setOpen(!1);return}setOpen(!0);if(groups)return;setLoading(!0);try{const g=await getProviders(i.id,i.media_type);setGroups((g||[]).filter(gr=>gr.type==='Streaming'))}catch{setGroups([])}finally{setLoading(!1)}}return(<div className="rounded-2xl border p-3 bg-white/70"><div className="flex items-start justify-between gap-3"><div><div className="font-medium">{i.title}</div><div className="text-sm text-slate-500">{i.year||''} · {i.media_type.toUpperCase()}</div></div><div className="flex gap-2"><button onClick={toggle} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">{open?'Hide':'Providers'}</button><button onClick={()=>setWatch(p=>p.filter(w=>!(w.id===i.id&&w.media_type===i.media_type)))} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Remove</button></div></div>{open&&(<div className="mt-3">{loading?<div className="text-sm">Loading providers…</div>:groups?<ProviderPills groups={groups}/>:<div className="text-sm text-red-600">Failed to load providers.</div>}</div>)}</div>)}async function copyShare(){try{await navigator.clipboard.writeText(shareable);alert('Shareable link copied to clipboard!')}catch{alert('Could not copy link. You can copy it manually.')}}function updateShareUrl(){try{history.replaceState(null,'',shareable)}catch(e){const u=new URL(shareable);location.hash=u.hash}}catch{alert('Could not copy link. You can copy it manually.')}}async function importIds(){const text=prompt('Paste IDs in the format tv:1399,movie:550 (comma-separated).');if(!text)return;const tokens=text.split(',').map(s=>s.trim()).filter(Boolean);const items=await Promise.all(tokens.map(async tok=>{const[mt,idStr]=tok.split(':'),m=(mt||'').toLowerCase()==='movie'?'movie':'tv',id=parseInt(idStr,10);if(!Number.isFinite(id))return null;try{const d=await tmdb.details(id,m);return{id,media_type:m,title:d.title||d.name||`#${id}`,year:(d.release_date||d.first_air_date||'').slice(0,4)}}catch{return{id,media_type:m,title:`${m.toUpperCase()} #${id}`,year:''}}}));setWatch(prev=>{const seen=new Set(prev.map(p=>`${p.media_type}:${p.id}`));const add=items.filter(Boolean).filter(x=>!seen.has(`${x.media_type}:${x.id}`));return[...prev,...add]})}function doSearch(e){e&&e.preventDefault&&e.preventDefault();if(!query.trim())return;setSearching(!0);tmdb.search(query.trim(),type).then(setResults).catch(()=>{}).finally(()=>setSearching(!1))}const [shareable,setShareable]=S(shareLink());U(()=>{setShareable(shareLink())},[watch,region]);return(<div className="max-w-6xl mx-auto p-4 sm:p-6"><header className="mb-6"><h1 className="text-2xl sm:text-3xl font-bold tracking-tight">StreamFinder <span className="font-normal text-slate-500">— React single-file (TV + Movies)</span></h1><p className="text-sm text-slate-600 mt-1">Search TV shows or movies, add them to your list, and share a link. Provider data courtesy of TMDB watch providers.</p></header><section className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4"><div className="rounded-2xl border p-4 bg-white/70 md:col-span-2"><div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end"><div><label className="block text-xs font-medium mb-1">Region</label><input type="text" className="w-28 rounded-xl border px-3 py-2" value={region} onChange={e=>setRegion(e.target.value.toUpperCase().slice(0,3))}/></div><div><label className="block text-xs font-medium mb-1">Search Type</label><select className="w-40 rounded-xl border px-3 py-2" value={type} onChange={e=>setType(e.target.value)}><option value="multi">TV & Movies</option><option value="tv">TV</option><option value="movie">Movies</option></select></div></div><form onSubmit={doSearch} className="mt-4 flex gap-2"><input type="text" className="flex-1 rounded-xl border px-3 py-2" placeholder="Search (e.g., The Bear, Dune)" value={query} onChange={e=>setQuery(e.target.value)}/><button type="submit" className="rounded-xl border px-4 py-2 shadow hover:shadow-md disabled:opacity-50" disabled={searching}>{searching?'Searching…':'Search'}</button></form>{results?.length?(<div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{results.map(r=><ResultCard key={`${r.media_type}:${r.id}`} item={r}/>)}</div>):(<div className="mt-4 text-sm text-slate-600">No results yet — try a search.</div>)}</div><aside className="rounded-2xl border p-4 bg-white/70"><div className="flex items-center justify-between mb-2"><h2 className="text-lg font-semibold">Your Watchlist</h2><span className="text-sm text-slate-500">{watch.length} item{watch.length!==1?'s':''}</span></div>{watch.length===0?(<div className="text-sm text-slate-600">Add items from the search results to build your list.</div>):(<div className="space-y-3">{watch.map(w=><WatchItem key={`${w.media_type}:${w.id}`} item={w}/>)}</div>)}<div className="mt-4"><label className="block text-xs font-medium mb-1">Shareable link</label><input type="text" className="w-full rounded-xl border px-3 py-2 text-xs" value={shareable} readOnly/><div className="flex gap-2 mt-2"><button onClick={copyShare} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Copy share link</button><button onClick={updateShareUrl} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Update URL<\/button><button onClick={importIds} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Import IDs</button><button onClick={async()=>{try{await navigator.clipboard.writeText(JSON.stringify(watch,null,2));alert('Watchlist JSON copied to clipboard.')}catch{alert('Could not copy.')}}} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Copy JSON</button></div><p className="text-xs text-slate-500 mt-2">Note: The link includes only IDs/types and region.</p></div></aside></section><footer className="mt-8 text-xs text-slate-500"><p>This product uses the TMDB API but is not endorsed or certified by TMDB. Availability can change and may vary by provider plan. Regions use ISO 3166-1 country codes.</p></footer></div>)}const root=ReactDOM.createRoot(document.getElementById('root'));root.render(<App/>);</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>StreamFinder — React (TV + Movies)</title>
+  <meta name="description" content="Search TV shows and movies, see where they stream by region, build a watchlist, and share a link. React single-file edition. Powered by TMDB." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>body{background:linear-gradient(#eff6ff,#ffffff)}</style>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="text-slate-900">
+  <div id="root" class="min-h-screen"></div>
+
+  <script type="text/babel">
+    const { useEffect: U, useMemo: M, useRef: R, useState: S } = React;
+
+    // Embedded TMDB API key (public in this file). If you prefer privacy, use the Worker build.
+    const API_KEY = "ac1d1e5563807a1a41306d1eec6a8374";
+
+    // ---- Helpers ----
+    function providerGroupsForRegion(resultByRegion){
+      const buckets = [
+        { key: 'flatrate', label: 'Streaming' },
+        { key: 'ads',      label: 'Free (ads)' },
+        { key: 'free',     label: 'Free' },
+        { key: 'rent',     label: 'Rent' },
+        { key: 'buy',      label: 'Buy' },
+      ];
+      return buckets.map(b => ({
+        type: b.label,
+        items: (resultByRegion?.[b.key] || []).map(p => ({
+          provider_id: p.provider_id,
+          provider_name: p.provider_name,
+          logo: p.logo_path ? `https://image.tmdb.org/t/p/w45${p.logo_path}` : ''
+        }))
+      }));
+    }
+
+    function parseShareHash(hashStr){
+      const params = new URLSearchParams((hashStr || '').replace(/^#/, ''));
+      const reg = (params.get('reg') || '').toUpperCase();
+      const ids = (params.get('ids') || '')
+        .split(',').map(s=>s.trim()).filter(Boolean)
+        .map(tok => {
+          const [mt, idStr] = tok.split(':');
+          const media_type = (mt || '').toLowerCase() === 'movie' ? 'movie' : 'tv';
+          const id = parseInt(idStr, 10);
+          if (!Number.isFinite(id)) return null;
+          return { id, media_type };
+        })
+        .filter(Boolean);
+      return { reg, ids };
+    }
+
+    const ProviderPills = ({ groups }) => {
+      const visible = (groups || []).filter(g => g.items && g.items.length);
+      if (!visible.length) return <div className="text-sm text-slate-500">No providers found for this region.</div>;
+      return (
+        <div className="flex flex-wrap gap-2">
+          {visible.map(g => (
+            <div key={g.type} className="rounded-2xl border px-3 py-2 shadow-sm">
+              <div className="text-xs font-medium opacity-70 mb-1">{g.type}</div>
+              <div className="flex flex-wrap gap-1 items-center">
+                {g.items.map(p => (
+                  <span key={p.provider_id} className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs">
+                    {p.logo && <img src={p.logo} alt={p.provider_name} className="h-4 w-4 rounded" />}
+                    {p.provider_name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    function App(){
+      const [region, setRegion]   = S('US');
+      const [query, setQuery]     = S('');
+      const [type, setType]       = S('multi'); // multi | tv | movie
+      const [searching, setSearching] = S(false);
+      const [results, setResults] = S([]);
+      const [watch, setWatch]     = S([]); // {id, media_type, title, year}
+
+      const cache = R(new Map()); // providers cache by `${type}:${id}:${region}`
+
+      // Persist region
+      U(() => { try { const r = localStorage.getItem('streamfinder_region'); if (r) setRegion(r); } catch {} }, []);
+      U(() => { try { localStorage.setItem('streamfinder_region', region); } catch {} }, [region]);
+
+      // TMDB tiny client
+      const tmdb = M(() => {
+        const BASE = 'https://api.themoviedb.org/3';
+        const img  = (p, s='w154') => p ? `https://image.tmdb.org/t/p/${s}${p}` : '';
+        return {
+          img,
+          async search(q, t){
+            const endpoint = t === 'tv' ? 'search/tv' : t === 'movie' ? 'search/movie' : 'search/multi';
+            const u = new URL(`${BASE}/${endpoint}`);
+            u.searchParams.set('api_key', API_KEY);
+            u.searchParams.set('query', q);
+            u.searchParams.set('include_adult', 'false');
+            const res = await fetch(u);
+            if (!res.ok) throw new Error(`Search failed (${res.status})`);
+            const data = await res.json();
+            return (data.results || [])
+              .filter(r => (r.media_type ? (r.media_type==='tv' || r.media_type==='movie') : true))
+              .map(r => ({
+                id: r.id,
+                title: r.title || r.name || r.original_title || r.original_name || `#${r.id}`,
+                year: (r.release_date || r.first_air_date || '').slice(0,4),
+                poster: r.poster_path ? img(r.poster_path) : '',
+                media_type: r.media_type || (t==='tv' ? 'tv' : 'movie')
+              }));
+          },
+          async details(id, mt){
+            const u = new URL(`${BASE}/${mt}/${id}`);
+            u.searchParams.set('api_key', API_KEY);
+            const res = await fetch(u);
+            if (!res.ok) throw new Error('Details failed');
+            return res.json();
+          },
+          async providers(id, mt){
+            const u = new URL(`${BASE}/${mt}/${id}/watch/providers`);
+            u.searchParams.set('api_key', API_KEY);
+            const res = await fetch(u);
+            if (!res.ok) throw new Error('Providers failed');
+            return res.json();
+          }
+        };
+      }, []);
+
+      // Build share link from current state
+      function shareLink(){
+        const ids = watch.map(w => `${w.media_type}:${w.id}`).join(',');
+        const u = new URL(location.href.split('#')[0]);
+        u.hash = new URLSearchParams({ ids, reg: region }).toString();
+        return u.toString();
+      }
+
+      // Hydrate from #ids=...,reg=... on first load
+      U(() => {
+        const { reg, ids } = parseShareHash(location.hash);
+        if (reg) setRegion(reg);
+        if (!ids.length) return;
+        // Add placeholders immediately
+        setWatch(prev => {
+          const seen = new Set(prev.map(p => `${p.media_type}:${p.id}`));
+          const add = ids
+            .map(({id, media_type}) => ({ id, media_type, title: `${media_type.toUpperCase()} #${id}`, year: '' }))
+            .filter(x => !seen.has(`${x.media_type}:${x.id}`));
+          return [...prev, ...add];
+        });
+        // Enrich with real titles/years
+        (async () => {
+          const enriched = await Promise.all(ids.map(async ({id, media_type}) => {
+            try {
+              const d = await tmdb.details(id, media_type);
+              return { id, media_type, title: d.title || d.name || `#${id}`, year: (d.release_date || d.first_air_date || '').slice(0,4) };
+            } catch {
+              return { id, media_type, title: `${media_type.toUpperCase()} #${id}`, year: '' };
+            }
+          }));
+          setWatch(prev => {
+            const map = new Map(prev.map(w => [`${w.media_type}:${w.id}`, w]));
+            enriched.forEach(e => { map.set(`${e.media_type}:${e.id}`, e); });
+            return Array.from(map.values());
+          });
+        })();
+      }, []);
+
+      async function getProviders(id, mt){
+        const k = `${mt}:${id}:${region}`;
+        const c = cache.current.get(k);
+        if (c) return c;
+        const data = await tmdb.providers(id, mt);
+        const groups = providerGroupsForRegion((data.results || {})[region]);
+        cache.current.set(k, groups);
+        return groups;
+      }
+
+      function ResultCard({ item: i }){
+        const [open, setOpen] = S(false);
+        const [loading, setLoading] = S(false);
+        const [groups, setGroups] = S(null);
+        async function toggle(){
+          if (open) { setOpen(false); return; }
+          setOpen(true);
+          if (groups) return;
+          setLoading(true);
+          try { const g = await getProviders(i.id, i.media_type); setGroups((g || []).filter(gr => gr.type === 'Streaming')); }
+          catch { setGroups([]); }
+          finally { setLoading(false); }
+        }
+        return (
+          <div className="rounded-2xl border p-3 shadow-sm bg-white/70">
+            <div className="flex gap-3">
+              {i.poster ? <img src={i.poster} alt="" className="w-20 h-28 object-cover rounded-xl"/> : <div className="w-20 h-28 bg-slate-100 rounded-xl"/>}
+              <div className="flex-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-semibold leading-tight">{i.title}</div>
+                    <div className="text-sm text-slate-500">{i.year || ''} · {i.media_type.toUpperCase()}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setWatch(p => p.some(w => w.id===i.id && w.media_type===i.media_type) ? p : [...p, { id:i.id, title:i.title, year:i.year||'', media_type:i.media_type }])} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Add</button>
+                    <button onClick={toggle} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">{open ? 'Hide' : 'Providers'}</button>
+                  </div>
+                </div>
+                {open && (
+                  <div className="mt-3">
+                    {loading ? <div className="text-sm">Loading providers…</div> : (groups ? <ProviderPills groups={groups}/> : <div className="text-sm text-red-600">Failed to load providers.</div>)}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      function WatchItem({ item: i }){
+        const [open, setOpen] = S(false);
+        const [loading, setLoading] = S(false);
+        const [groups, setGroups] = S(null);
+        async function toggle(){
+          if (open) { setOpen(false); return; }
+          setOpen(true);
+          if (groups) return;
+          setLoading(true);
+          try { const g = await getProviders(i.id, i.media_type); setGroups((g || []).filter(gr => gr.type === 'Streaming')); }
+          catch { setGroups([]); }
+          finally { setLoading(false); }
+        }
+        return (
+          <div className="rounded-2xl border p-3 bg-white/70">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="font-medium">{i.title}</div>
+                <div className="text-sm text-slate-500">{i.year || ''} · {i.media_type.toUpperCase()}</div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={toggle} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">{open ? 'Hide' : 'Providers'}</button>
+                <button onClick={() => setWatch(p => p.filter(w => !(w.id===i.id && w.media_type===i.media_type)))} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Remove</button>
+              </div>
+            </div>
+            {open && (
+              <div className="mt-3">
+                {loading ? <div className="text-sm">Loading providers…</div> : (groups ? <ProviderPills groups={groups}/> : <div className="text-sm text-red-600">Failed to load providers.</div>)}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // Share link UI helpers
+      const [shareable, setShareable] = S(shareLink());
+      U(() => { setShareable(shareLink()); }, [watch, region]);
+      async function copyShare(){
+        try { await navigator.clipboard.writeText(shareable); alert('Shareable link copied to clipboard!'); }
+        catch { alert('Could not copy link. You can copy it manually.'); }
+      }
+      function updateShareUrl(){
+        try { history.replaceState(null, '', shareable); }
+        catch(e) { const u = new URL(shareable); location.hash = u.hash; }
+      }
+
+      async function importIds(){
+        const text = prompt('Paste IDs in the format tv:1399,movie:550 (comma-separated).');
+        if (!text) return;
+        const tokens = text.split(',').map(s=>s.trim()).filter(Boolean);
+        const items = await Promise.all(tokens.map(async tok => {
+          const [mt, idStr] = tok.split(':');
+          const m = (mt||'').toLowerCase()==='movie' ? 'movie' : 'tv';
+          const id = parseInt(idStr, 10);
+          if (!Number.isFinite(id)) return null;
+          try {
+            const d = await tmdb.details(id, m);
+            return { id, media_type:m, title: d.title || d.name || `#${id}`, year: (d.release_date||d.first_air_date||'').slice(0,4) };
+          } catch {
+            return { id, media_type:m, title: `${m.toUpperCase()} #${id}`, year: '' };
+          }
+        }));
+        setWatch(prev => {
+          const seen = new Set(prev.map(p => `${p.media_type}:${p.id}`));
+          const add = items.filter(Boolean).filter(x => !seen.has(`${x.media_type}:${x.id}`));
+          return [...prev, ...add];
+        });
+      }
+
+      function doSearch(e){
+        e && e.preventDefault && e.preventDefault();
+        if (!query.trim()) return;
+        setSearching(true);
+        tmdb.search(query.trim(), type).then(setResults).catch(()=>{}).finally(()=>setSearching(false));
+      }
+
+      return (
+        <div className="max-w-6xl mx-auto p-4 sm:p-6">
+          <header className="mb-6">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">StreamFinder <span className="font-normal text-slate-500">— React single-file (TV + Movies)</span></h1>
+            <p className="text-sm text-slate-600 mt-1">Search TV shows or movies, add them to your list, and share a link. Provider data courtesy of TMDB watch providers.</p>
+          </header>
+
+          <section className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="rounded-2xl border p-4 bg-white/70 md:col-span-2">
+              <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end">
+                <div>
+                  <label className="block text-xs font-medium mb-1">Region</label>
+                  <input type="text" className="w-28 rounded-xl border px-3 py-2" value={region} onChange={e=>setRegion(e.target.value.toUpperCase().slice(0,3))} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1">Search Type</label>
+                  <select className="w-40 rounded-xl border px-3 py-2" value={type} onChange={e=>setType(e.target.value)}>
+                    <option value="multi">TV & Movies</option>
+                    <option value="tv">TV</option>
+                    <option value="movie">Movies</option>
+                  </select>
+                </div>
+              </div>
+              <form onSubmit={doSearch} className="mt-4 flex gap-2">
+                <input type="text" className="flex-1 rounded-xl border px-3 py-2" placeholder="Search (e.g., The Bear, Dune)" value={query} onChange={e=>setQuery(e.target.value)} />
+                <button type="submit" className="rounded-xl border px-4 py-2 shadow hover:shadow-md disabled:opacity-50" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button>
+              </form>
+              {results?.length ? (
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {results.map(r => <ResultCard key={`${r.media_type}:${r.id}`} item={r} />)}
+                </div>
+              ) : (
+                <div className="mt-4 text-sm text-slate-600">No results yet — try a search.</div>
+              )}
+            </div>
+
+            <aside className="rounded-2xl border p-4 bg-white/70">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-lg font-semibold">Your Watchlist</h2>
+                <span className="text-sm text-slate-500">{watch.length} item{watch.length!==1?'s':''}</span>
+              </div>
+
+              {watch.length===0 ? (
+                <div className="text-sm text-slate-600">Add items from the search results to build your list.</div>
+              ) : (
+                <div className="space-y-3">
+                  {watch.map(w => <WatchItem key={`${w.media_type}:${w.id}`} item={w} />)}
+                </div>
+              )}
+
+              <div className="mt-4">
+                <label className="block text-xs font-medium mb-1">Shareable link</label>
+                <input type="text" className="w-full rounded-xl border px-3 py-2 text-xs" value={shareable} readOnly />
+                <div className="flex gap-2 mt-2">
+                  <button onClick={copyShare} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Copy share link</button>
+                  <button onClick={updateShareUrl} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Update URL</button>
+                  <button onClick={importIds} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Import IDs</button>
+                  <button onClick={async()=>{try{await navigator.clipboard.writeText(JSON.stringify(watch,null,2));alert('Watchlist JSON copied to clipboard.')}catch{alert('Could not copy.')}}} className="rounded-xl border px-3 py-1.5 text-sm shadow hover:shadow-md">Copy JSON</button>
+                </div>
+                <p className="text-xs text-slate-500 mt-2">Note: The link includes only IDs/types and region.</p>
+              </div>
+            </aside>
+          </section>
+
+          <footer className="mt-8 text-xs text-slate-500">
+            <p>This product uses the TMDB API but is not endorsed or certified by TMDB. Availability can change and may vary by provider plan. Regions use ISO 3166-1 country codes.</p>
+          </footer>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+
+    // ---- Optional self-tests (run with ?selftest=1) ----
+    if (location.search.includes('selftest=1')){
+      console.log('[SelfTest] Running basic assertions…');
+      try {
+        const a = parseShareHash('#ids=tv:1399,movie:550&reg=US');
+        console.assert(a.reg === 'US', 'reg should be US');
+        console.assert(a.ids.length === 2, 'should parse two ids');
+        console.assert(a.ids[0].media_type === 'tv' && a.ids[0].id === 1399, 'first token parsed');
+        console.assert(a.ids[1].media_type === 'movie' && a.ids[1].id === 550, 'second token parsed');
+        console.log('[SelfTest] OK');
+      } catch (e) {
+        console.warn('[SelfTest] Failed', e);
+      }
+    }
+  </script>
+</body>
+</html>
