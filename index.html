@@ -9,13 +9,13 @@
   <style>body{background:linear-gradient(#eff6ff,#ffffff)}</style>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
 </head>
 <body class="text-slate-900">
   <div id="root" class="min-h-screen"></div>
 
   <!-- Compile JSX with Babel; explicitly set presets to avoid Script error on older browsers -->
-  <script type="text/babel" data-presets="env,react">
+<script type="text/babel" data-presets="env" data-plugins="transform-react-jsx">
     const { useEffect: U, useMemo: M, useRef: R, useState: S } = React;
 
     // Embedded TMDB API key (public in this file). If you prefer privacy, use the Worker build.
